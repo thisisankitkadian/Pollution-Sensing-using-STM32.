@@ -1,4 +1,4 @@
-// Pollution Sensing System TECE 600 Independent Study
+// Pollution Sensing System 
 // Ankit Kadian (Electronics and Communication Engineering)
 //Student Id- 17EC003
 /*********************FINAL CODE****************/
