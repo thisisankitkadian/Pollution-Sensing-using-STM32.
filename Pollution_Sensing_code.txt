@@ -1,6 +1,5 @@
 // Pollution Sensing System 
 // Ankit Kadian (Electronics and Communication Engineering)
-//Student Id- 17EC003
 /*********************FINAL CODE****************/
 #include <SPI.h>
 #include <Wire.h>
