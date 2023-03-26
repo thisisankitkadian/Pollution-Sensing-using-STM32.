@@ -1,0 +1,722 @@
+// Pollution Sensing System TECE 600 Independent Study
+// Ankit Kadian (Electronics and Communication Engineering)
+//Student Id- 17EC003
+/*********************FINAL CODE****************/
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <MQ135.h>
+
+#define PIN_MQ135 PA6
+#define MQ2 PB0
+#define TURBIDITY PA7
+#define PH PA2
+
+#define START PB5
+#define UP PB8
+#define DOWN PB9
+
+#define BUZZER PB4
+#define LED PA4
+
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+
+#define OLED_RESET -1       // Reset pin # (or -1 if sharing Arduino reset pin)
+#define SCREEN_ADDRESS 0x3C ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+MQ135 mq135_sensor(PIN_MQ135);
+
+unsigned long int avgValue; // Store the average value of the sensor feedback
+int buf[10], temp;
+float volt;
+float ntu;
+
+float temperature = 30.0; // Assume current temperature. Recommended to measure with DHT22
+float humidity = 70.0;    // Assume current humidity. Recommended to measure with DHT22
+
+unsigned long current_time = 0;
+unsigned long display_time = 0;
+
+byte day = 3;
+byte month = 9;
+int year = 2022;
+
+byte hour = 12;
+byte minute = 0;
+byte sec = 0;
+
+String am_pm = "PM";
+
+int flag = 12;
+
+byte low_ph = 4;
+byte high_ph = 10;
+
+byte high_air_quality = 200;
+
+int low_turbidity = 2500;
+int high_turbidity = 3005;
+
+float air_quality_value = 0;
+float ph_value = 7;
+float turbidity_value = 9;
+
+bool show_ph = false;
+bool show_turbidity = false;
+
+int counter = 0;
+int old_counter = 0;
+
+void setup()
+{
+    Serial.begin(9600);
+
+    pinMode(START, INPUT_PULLUP);
+    pinMode(UP, INPUT_PULLUP);
+    pinMode(DOWN, INPUT_PULLUP);
+    pinMode(BUZZER, OUTPUT);
+    pinMode(LED, OUTPUT);
+    pinMode(PH, INPUT);
+    pinMode(TURBIDITY, INPUT);
+    pinMode(MQ2, INPUT);
+
+    digitalWrite(BUZZER, LOW);
+
+    // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
+    if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS))
+    {
+        Serial.println(F("SSD1306 allocation failed"));
+        for (;;)
+            ; // Don't proceed, loop forever
+    }
+
+    // Clear the buffer
+    display.clearDisplay();
+    display.setTextSize(1);              // Normal 1:1 pixel scale
+    display.setTextColor(SSD1306_WHITE); // Draw white text
+    display.setCursor(0, 0);             // Start at top-left corner
+    display.println(F("Pollution Sensing System!"));
+    display.display();
+
+    delay(3000);
+
+    current_time = millis();
+    display_time = millis();
+}
+
+void loop()
+{
+    air_quality_value = getAirQuality();
+    ph_value = getPh();
+    turbidity_value = getTurbidity();
+
+    display.clearDisplay();
+    display.setTextSize(1);              // Normal 1:1 pixel scale
+    display.setTextColor(SSD1306_WHITE); // Draw white text
+    display.setCursor(0, 0);             // Start at top-left corner
+
+    if (!digitalRead(UP) && counter < 2)
+    {
+        counter = counter + 1;
+    }
+    else if (!digitalRead(DOWN) && counter > 0)
+    {
+        counter = counter - 1;
+    }
+
+    if (counter == 1)
+    {
+        display.print(F("ph: "));
+        display.print(ph_value);
+        if (ph_value >= high_ph)
+        {
+            display.clearDisplay();
+            display.setTextSize(1);              // Normal 1:1 pixel scale
+            display.setTextColor(SSD1306_WHITE); // Draw white text
+            display.setCursor(0, 0);             // Start at top-left corner
+            display.print(F("pH: "));
+            display.print(ph_value);
+            display.setCursor(45, 15);
+            display.println(F("pH High"));
+            display.setCursor(30, 30); // Start at top-left corner
+            display.setTextSize(2);
+            display.println(F("ALERT!"));
+            display.display();
+            beep();
+        }
+        else if (ph_value <= low_ph)
+        {
+            display.clearDisplay();
+            display.setTextSize(1);              // Normal 1:1 pixel scale
+            display.setTextColor(SSD1306_WHITE); // Draw white text
+            display.setCursor(0, 0);             // Start at top-left corner
+            display.print(F("pH: "));
+            display.print(ph_value);
+            display.setCursor(45, 15);
+            display.println(F("pH Low"));
+            display.setCursor(30, 30); // Start at top-left corner
+            display.setTextSize(2);
+            display.println(F("ALERT!"));
+            display.display();
+            beep();
+        }
+        else
+        {
+            showTime();
+        }
+    }
+    else if (counter == 2)
+    {
+        display.print(F("Turbidity: "));
+        display.print(turbidity_value);
+        display.println(F("NTU"));
+        display_time = millis();
+        if (turbidity_value >= high_turbidity)
+        {
+            display.clearDisplay();
+            display.setTextSize(1);              // Normal 1:1 pixel scale
+            display.setTextColor(SSD1306_WHITE); // Draw white text
+            display.setCursor(0, 0);             // Start at top-left corner
+            display.print(F("Turbidity: "));
+            display.print(turbidity_value);
+            display.setCursor(25, 15);
+            display.println(F("Turbidity High"));
+            display.setCursor(30, 30); // Start at top-left corner
+            display.setTextSize(2);
+            display.println(F("ALERT!"));
+            display.display();
+            beep();
+        }
+        else if (turbidity_value <= low_turbidity)
+        {
+            display.clearDisplay();
+            display.setTextSize(1);              // Normal 1:1 pixel scale
+            display.setTextColor(SSD1306_WHITE); // Draw white text
+            display.setCursor(0, 0);             // Start at top-left corner
+            display.print(F("Turbidity: "));
+            display.print(turbidity_value);
+            display.setCursor(25, 15);
+            display.println(F("Turbidity Low"));
+            display.setCursor(30, 30); // Start at top-left corner
+            display.setTextSize(2);
+            display.println(F("ALERT!"));
+            display.display();
+            beep();
+        }
+        else
+        {
+            showTime();
+        }
+    }
+    else
+    {
+        display.print(F("AirQ: "));
+        display.print(air_quality_value);
+        display.println(F("PPM"));
+        if (air_quality_value >= high_air_quality)
+        {
+            display.clearDisplay();
+            display.setTextSize(1);              // Normal 1:1 pixel scale
+            display.setTextColor(SSD1306_WHITE); // Draw white text
+            display.setCursor(0, 0);             // Start at top-left corner
+            display.print(F("AirQ: "));
+            display.print(air_quality_value);
+            display.println(F(" PPM"));
+            display.setCursor(30, 15);
+            display.println(F("Air Quality"));
+            display.setCursor(30, 30); // Start at top-left corner
+            display.setTextSize(2);
+            display.println(F("ALERT!"));
+            display.display();
+            beep();
+        }
+        else if (analogRead(MQ2) > 300)
+        {
+            display.clearDisplay();
+            display.setTextSize(1);              // Normal 1:1 pixel scale
+            display.setTextColor(SSD1306_WHITE); // Draw white text
+            display.setCursor(0, 0);             // Start at top-left corner
+            display.print(F("AirQ: "));
+            display.print(air_quality_value);
+            display.println(F(" PPM"));
+            display.setCursor(28, 15);
+            display.println(F("Gas detected"));
+            display.setCursor(30, 30); // Start at top-left corner
+            display.setTextSize(2);
+            display.println(F("ALERT!"));
+            display.display();
+            beep();
+        }
+        else
+        {
+            showTime();
+        }
+    }
+
+    if (!digitalRead(START))
+    {
+        delay(300);
+        settings();
+    }
+}
+
+void showTime()
+{
+    display.setCursor(0, 10);
+    display.print(F("Date: "));
+    display.println(getDate());
+    display.setCursor(0, 30); // Start at top-left corner
+    display.setTextSize(2);
+    display.println(getTime());
+    display.display();
+}
+
+float getAirQuality(void)
+{
+    float rzero = mq135_sensor.getRZero();
+    float correctedRZero = mq135_sensor.getCorrectedRZero(temperature, humidity);
+    float resistance = mq135_sensor.getResistance();
+    float ppm = mq135_sensor.getPPM();
+    float correctedPPM = (mq135_sensor.getCorrectedPPM(temperature, humidity));
+
+    Serial.print("MQ135 RZero: ");
+    Serial.print(rzero);
+    Serial.print("\t Corrected RZero: ");
+    Serial.print(correctedRZero);
+    Serial.print("\t Resistance: ");
+    Serial.print(resistance);
+    Serial.print("\t PPM: ");
+    Serial.print(ppm);
+    Serial.print("\t Corrected PPM: ");
+    Serial.print(correctedPPM);
+    Serial.println("ppm");
+
+    delay(300);
+
+    return correctedPPM;
+}
+
+float getPh()
+{
+    for (int i = 0; i < 10; i++) // Get 10 sample value from the sensor for smooth the value
+    {
+        buf[i] = analogRead(PH);
+        delay(10);
+    }
+    for (int i = 0; i < 9; i++) // sort the analog from small to large
+    {
+        for (int j = i + 1; j < 10; j++)
+        {
+            if (buf[i] > buf[j])
+            {
+                temp = buf[i];
+                buf[i] = buf[j];
+                buf[j] = temp;
+            }
+        }
+    }
+    avgValue = 0;
+    for (int i = 2; i < 8; i++) // take the average value of 6 center sample
+        avgValue += buf[i];
+
+    float phValue = (float)avgValue * 3.3 / 4095 / 6; // convert the analog into millivolt
+    phValue = 3.5 * phValue;                          // convert the millivolt into pH value
+
+    return phValue;
+}
+
+float getTurbidity()
+{
+    volt = 0;
+    for (int i = 0; i < 800; i++)
+    {
+        volt += ((float)analogRead(TURBIDITY) / 4095) * 5;
+    }
+    volt = volt / 800;
+    volt = round_to_dp(volt, 2);
+    if (volt < 2.5)
+    {
+        ntu = 3000;
+    }
+    else
+    {
+        ntu = -1120.4 * sq(volt) + 5742.3 * volt - 4353.8;
+    }
+    return ntu;
+}
+
+float round_to_dp(float in_value, int decimal_place)
+{
+    float multiplier = powf(10.0f, decimal_place);
+    in_value = roundf(in_value * multiplier) / multiplier;
+    return in_value;
+}
+
+String getTime()
+{
+    if (millis() - current_time >= 1000)
+    {
+        sec = sec + 1;
+        if (flag < 12)
+            am_pm = "AM";
+        if (flag == 12)
+            am_pm = "PM";
+        if (flag > 12)
+            am_pm = "PM";
+        if (flag == 24)
+            flag = 0;
+
+        if (sec == 60)
+        {
+            sec = 0;
+            minute = minute + 1;
+        }
+        if (minute == 60)
+        {
+            minute = 0;
+            hour = hour + 1;
+            flag = flag + 1;
+        }
+        if (hour == 13)
+        {
+            hour = 1;
+        }
+        current_time = millis();
+    }
+
+    return (String(hour) + ":" + String(minute) + ":" + String(sec) + am_pm);
+}
+
+String getDate()
+{
+    return (String(day) + "/" + String(month) + "/" + String(year));
+}
+
+void settings()
+{
+    counter = 0;
+    old_counter = 0;
+    display.clearDisplay();
+    display.setTextSize(1);              // Normal 1:1 pixel scale
+    display.setTextColor(SSD1306_WHITE); // Draw white text
+    display.setCursor(0, 0);             // Start at top-left corner
+    display.println(F("Settings:"));
+    display.setCursor(0, 15);
+    display.print(F("=> Set pH"));
+    display.setCursor(0, 25);
+    display.print(F("   Set Turbidity"));
+    display.setCursor(0, 35);
+    display.print(F("   Set Air Quality"));
+    display.display();
+    delay(1000);
+
+    while (true)
+    {
+        if (!digitalRead(DOWN) && counter < 2)
+        {
+            counter = counter + 1;
+        }
+        else if (!digitalRead(UP) && counter > 0)
+        {
+            counter = counter - 1;
+        }
+        if (!digitalRead(START) && counter == 0)
+        {
+            delay(300);
+            setLowPh();
+            setHighPh();
+            break;
+        }
+        else if (!digitalRead(START) && counter == 1)
+        {
+            delay(300);
+            setLowTurbidity();
+            setHighTurbidity();
+            break;
+        }
+        else if (!digitalRead(START) && counter == 2)
+        {
+            delay(300);
+            setHighAirQuality();
+            break;
+        }
+        if (old_counter != counter)
+        {
+            display.clearDisplay();
+            display.setTextSize(1);              // Normal 1:1 pixel scale
+            display.setTextColor(SSD1306_WHITE); // Draw white text
+            display.setCursor(0, 0);             // Start at top-left corner
+            display.println(F("Settings:"));
+            display.setCursor(0, 15);
+            if (counter == 0)
+            {
+                display.print(F("=> Set pH"));
+                display.setCursor(0, 25);
+                display.print(F("   Set Turbidity"));
+                display.setCursor(0, 35);
+                display.print(F("   Set Air Quality"));
+            }
+            else if (counter == 1)
+            {
+                display.print(F("   Set pH"));
+                display.setCursor(0, 25);
+                display.print(F("=> Set Turbidity"));
+                display.setCursor(0, 35);
+                display.print(F("   Set Air Quality"));
+            }
+            else if (counter == 2)
+            {
+                display.print(F("   Set pH"));
+                display.setCursor(0, 25);
+                display.print(F("   Set Turbidity"));
+                display.setCursor(0, 35);
+                display.print(F("=> Set Air Quality"));
+            }
+            display.display();
+
+            old_counter = counter;
+        }
+        delay(300);
+    }
+
+    counter = 0;
+    old_counter = 0;
+}
+
+void setLowPh()
+{
+    counter = low_ph;
+    old_counter = low_ph;
+    display.clearDisplay();
+    display.setTextSize(1);              // Normal 1:1 pixel scale
+    display.setTextColor(SSD1306_WHITE); // Draw white text
+    display.setCursor(0, 0);             // Start at top-left corner
+    display.println(F("Set low pH:"));
+    display.setTextSize(2);
+    display.setCursor(0, 15);
+    display.print(counter);
+    display.display();
+    while (true)
+    {
+        if (!digitalRead(UP) && counter < 14)
+        {
+            counter = counter + 1;
+        }
+        else if (!digitalRead(DOWN) && counter > 1)
+        {
+            counter = counter - 1;
+        }
+        else if (!digitalRead(START))
+        {
+            delay(300);
+            low_ph = counter;
+            break;
+        }
+        if (old_counter != counter)
+        {
+            display.clearDisplay();
+            display.setTextSize(1);              // Normal 1:1 pixel scale
+            display.setTextColor(SSD1306_WHITE); // Draw white text
+            display.setCursor(0, 0);             // Start at top-left corner
+            display.println(F("Set low pH:"));
+            display.setTextSize(2);
+            display.setCursor(0, 15);
+            display.print(counter);
+            display.display();
+        }
+        delay(300);
+    }
+}
+
+void setHighPh()
+{
+    counter = high_ph;
+    old_counter = high_ph;
+    display.clearDisplay();
+    display.setTextSize(1);              // Normal 1:1 pixel scale
+    display.setTextColor(SSD1306_WHITE); // Draw white text
+    display.setCursor(0, 0);             // Start at top-left corner
+    display.println(F("Set high pH:"));
+    display.setTextSize(2);
+    display.setCursor(0, 15);
+    display.print(counter);
+    display.display();
+    while (true)
+    {
+        if (!digitalRead(UP) && counter < 14)
+        {
+            counter = counter + 1;
+        }
+        else if (!digitalRead(DOWN) && counter > 1)
+        {
+            counter = counter - 1;
+        }
+        else if (!digitalRead(START))
+        {
+            delay(300);
+            high_ph = counter;
+            break;
+        }
+        if (old_counter != counter)
+        {
+            display.clearDisplay();
+            display.setTextSize(1);              // Normal 1:1 pixel scale
+            display.setTextColor(SSD1306_WHITE); // Draw white text
+            display.setCursor(0, 0);             // Start at top-left corner
+            display.println(F("Set high pH:"));
+            display.setTextSize(2);
+            display.setCursor(0, 15);
+            display.print(counter);
+            display.display();
+        }
+        delay(300);
+    }
+}
+
+void setLowTurbidity()
+{
+    counter = low_turbidity;
+    old_counter = low_turbidity;
+    display.clearDisplay();
+    display.setTextSize(1);              // Normal 1:1 pixel scale
+    display.setTextColor(SSD1306_WHITE); // Draw white text
+    display.setCursor(0, 0);             // Start at top-left corner
+    display.println(F("Set low Turbidity:"));
+    display.setTextSize(2);
+    display.setCursor(0, 15);
+    display.print(counter);
+    display.display();
+    while (true)
+    {
+        if (!digitalRead(UP) && counter < 3010)
+        {
+            counter = counter + 1;
+        }
+        else if (!digitalRead(DOWN) && counter > 2000)
+        {
+            counter = counter - 1;
+        }
+        else if (!digitalRead(START))
+        {
+            delay(300);
+            low_turbidity = counter;
+            break;
+        }
+        if (old_counter != counter)
+        {
+            display.clearDisplay();
+            display.setTextSize(1);              // Normal 1:1 pixel scale
+            display.setTextColor(SSD1306_WHITE); // Draw white text
+            display.setCursor(0, 0);             // Start at top-left corner
+            display.println(F("Set low Turbidity:"));
+            display.setTextSize(2);
+            display.setCursor(0, 15);
+            display.print(counter);
+            display.display();
+        }
+        delay(300);
+    }
+}
+
+void setHighTurbidity()
+{
+    counter = high_turbidity;
+    old_counter = high_turbidity;
+    display.clearDisplay();
+    display.setTextSize(1);              // Normal 1:1 pixel scale
+    display.setTextColor(SSD1306_WHITE); // Draw white text
+    display.setCursor(0, 0);             // Start at top-left corner
+    display.println(F("Set high Turbidity:"));
+    display.setTextSize(2);
+    display.setCursor(0, 15);
+    display.print(counter);
+    display.display();
+    while (true)
+    {
+        if (!digitalRead(UP) && counter < 3010)
+        {
+            counter = counter + 1;
+        }
+        else if (!digitalRead(DOWN) && counter > 2000)
+        {
+            counter = counter - 1;
+        }
+        else if (!digitalRead(START))
+        {
+            delay(300);
+            high_turbidity = counter;
+            break;
+        }
+        if (old_counter != counter)
+        {
+            display.clearDisplay();
+            display.setTextSize(1);              // Normal 1:1 pixel scale
+            display.setTextColor(SSD1306_WHITE); // Draw white text
+            display.setCursor(0, 0);             // Start at top-left corner
+            display.println(F("Set high Turbidity:"));
+            display.setTextSize(2);
+            display.setCursor(0, 15);
+            display.print(counter);
+            display.display();
+        }
+        delay(300);
+    }
+}
+
+void setHighAirQuality()
+{
+    counter = high_air_quality;
+    old_counter = high_air_quality;
+    display.clearDisplay();
+    display.setTextSize(1);              // Normal 1:1 pixel scale
+    display.setTextColor(SSD1306_WHITE); // Draw white text
+    display.setCursor(0, 0);             // Start at top-left corner
+    display.println(F("Set high Air Quality:"));
+    display.setTextSize(2);
+    display.setCursor(0, 15);
+    display.print(counter);
+    display.display();
+    while (true)
+    {
+        if (!digitalRead(UP) && counter < 255)
+        {
+            counter = counter + 1;
+        }
+        else if (!digitalRead(DOWN) && counter > 10)
+        {
+            counter = counter - 1;
+        }
+        else if (!digitalRead(START))
+        {
+            delay(300);
+            high_air_quality = counter;
+            break;
+        }
+        if (old_counter != counter)
+        {
+            display.clearDisplay();
+            display.setTextSize(1);              // Normal 1:1 pixel scale
+            display.setTextColor(SSD1306_WHITE); // Draw white text
+            display.setCursor(0, 0);             // Start at top-left corner
+            display.println(F("Set high Air Quality:"));
+            display.setTextSize(2);
+            display.setCursor(0, 15);
+            display.print(counter);
+            display.display();
+        }
+        delay(300);
+    }
+}
+
+void beep(void)
+{
+    digitalWrite(BUZZER, HIGH);
+    digitalWrite(LED, HIGH);
+    delay(100);
+    digitalWrite(BUZZER, LOW);
+    digitalWrite(LED, LOW);
+    delay(100);
+}
